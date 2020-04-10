@@ -8,17 +8,25 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.Socket;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Scanner;
 
 public class ClientGUI extends JFrame implements ActionListener, Thread.UncaughtExceptionHandler, SocketThreadListener {
 
     private static final int WIDTH = 600;
     private static final int HEIGHT = 300;
+
+    private static final String logFileName = "log.txt";
+    private static final String censorFileName = "censorlist.txt";
+    private static final Character censored = '#';
+    private static HashSet<String> censorList = new HashSet<>();
 
     private final JTextArea log = new JTextArea();
     private final JPanel panelTop = new JPanel(new GridLayout(2, 3));
@@ -73,8 +81,12 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         add(panelTop, BorderLayout.NORTH);
         add(panelBottom, BorderLayout.SOUTH);
 
+        loadingCensorLib();
+
         setVisible(true);
     }
+
+
 
     private void connect() {
         try {
@@ -84,6 +96,64 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
             showException(Thread.currentThread(), e);
         }
     }
+
+    // Метод цензурирования
+    private void loadingCensorLib() {
+        try (
+                FileReader in = new FileReader(censorFileName)) {
+            Scanner scanner = new Scanner(in);
+            while (scanner.hasNextLine()) {
+                censorList.add(scanner.nextLine());
+            }
+        } catch (IOException e) {
+            if (!shownIoErrors) {
+                shownIoErrors = true;
+                showException(Thread.currentThread(), e);
+            }
+        }
+    }
+    public boolean isCensorNeed(String msg) {
+        String[] message=msg.split(" ");
+        for (String word:
+                message) {
+            if(censorList.contains(word)) return true;
+        }
+        return false;
+    }
+
+    public String censoring(String msg) {
+        StringBuilder censoredMsg=new StringBuilder();
+        String[] message=msg.split(" ");
+        for (String word:
+                message) {
+            if(censorList.contains(word)) censoredMsg.append(getCensoringWord(word)+" ");
+            else censoredMsg.append(word+" ");
+        }
+        return censoredMsg.toString().trim();
+    }
+
+    private String getCensoringWord(String word) {
+        StringBuilder censorword=new StringBuilder();
+        for (int i = 0; i < word.length(); i++) {
+            censorword.append(censored);
+        }
+        return censorword.toString();
+    }
+
+    private void preparingMsgToPutLog(String msg, boolean fromLog){
+        String[] words=msg.trim().split(" ");
+        StringBuilder resultMsg=new StringBuilder();
+        for (String word:words
+        ) {
+            if (isCensorNeed(word)) {
+                resultMsg.append(censoring(word) + " ");
+            } else {
+                resultMsg.append(word + " ");
+            }
+        }
+        putLog(resultMsg.toString().trim(),fromLog);
+    }
+
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(new Runnable() {
@@ -117,12 +187,12 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         tfMessage.setText(null);
         tfMessage.requestFocusInWindow();
         socketThread.sendMessage(Library.getTypeBcastClient(msg));
-        //wrtMsgToLogFile(msg, username);
     }
 
-    private void wrtMsgToLogFile(String msg, String username) {
-        try (FileWriter out = new FileWriter("log.txt", true)) {
-            out.write(username + ": " + msg + "\n");
+    // Создаём метод для записи истории сообщений
+    private void wrtMsgToLogFile(String msg) {
+        try (FileWriter out = new FileWriter(logFileName, true)) {
+            out.write( msg + "\n");
             out.flush();
         } catch (IOException e) {
             if (!shownIoErrors) {
@@ -132,7 +202,37 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         }
     }
 
-    private void putLog(String msg) {
+    private void readMsgFromLogFile() {
+
+        try (
+                FileReader in = new FileReader(logFileName)) {
+            Scanner scanner = new Scanner(in);
+            int i = 0;
+            StringBuilder lastHundredlogLines = new StringBuilder();
+            while (scanner.hasNextLine()) {
+                if (i < 100)
+                    lastHundredlogLines.append(scanner.nextLine()+"\n");
+                i++;
+            }
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                    log.setText("");
+                }
+            });
+            putLog(lastHundredlogLines.toString(),  true);
+            scanner.close();
+        } catch (IOException e) {
+            if (!shownIoErrors) {
+                shownIoErrors = true;
+                showException(Thread.currentThread(), e);
+            }
+        }
+    }
+
+
+
+    private void putLog(String msg, boolean fromLog) {
         if ("".equals(msg)) return;
         SwingUtilities.invokeLater(new Runnable() {
             @Override
@@ -141,8 +241,8 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
                 log.setCaretPosition(log.getDocument().getLength());
             }
         });
+        if(!fromLog) wrtMsgToLogFile(msg);
     }
-
     private void showException(Thread t, Throwable e) {
         String msg;
         StackTraceElement[] ste = e.getStackTrace();
@@ -169,7 +269,7 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
 
     @Override
     public void onSocketStart(SocketThread thread, Socket socket) {
-        putLog("Start");
+        putLog("Start", false);
     }
 
     @Override
@@ -197,7 +297,6 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
 
     @Override
     public void onSocketException(SocketThread thread, Exception exception) {
-        // showException(thread, exception);
     }
 
     private void handleMessage(String msg) {
@@ -206,17 +305,18 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         switch (msgType) {
             case Library.AUTH_ACCEPT:
                 setTitle(WINDOW_TITLE + " entered with nickname: " + arr[1]);
+                readMsgFromLogFile();
                 break;
             case Library.AUTH_DENIED:
-                putLog(msg);
+                preparingMsgToPutLog(msg, false);
                 break;
             case Library.MSG_FORMAT_ERROR:
-                putLog(msg);
+                preparingMsgToPutLog(msg, false);
                 socketThread.close();
                 break;
             case Library.TYPE_BROADCAST:
-                putLog(DATE_FORMAT.format(Long.parseLong(arr[1])) +
-                        arr[2] + ": " + arr[3]);
+                preparingMsgToPutLog(DATE_FORMAT.format(Long.parseLong(arr[1])) +
+                        arr[2] + ": " + arr[3], false);
                 break;
             case Library.USER_LIST:
                 String users = msg.substring(Library.USER_LIST.length() +
