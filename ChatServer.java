@@ -17,6 +17,9 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
     private final ChatServerListener listener;
     private ServerSocketThread server;
     private final DateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss: ");
+
+    private Thread checkActivity;
+
     private Vector<SocketThread> clients = new Vector<>();
 
     public ChatServer(ChatServerListener listener) {
@@ -28,6 +31,38 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
             putLog("Server already started");
         else
             server = new ServerSocketThread(this, "Server", port, 2000);
+    }
+
+    public void checkActivity() {
+        checkActivity = new Thread() {
+            synchronized void check() {
+                ClientThread client;
+                for (int i = 0; i < clients.size(); i++) {
+                    client = (ClientThread) clients.get(i);
+                    if (!client.isAuthorized()) {
+                        client.sendMessage(Library.AUTH_DENIED + Library.DELIMITER + "Your connection was closed");
+                        clients.get(i).close();
+                        clients.remove(i);
+                    }
+                }
+            }
+
+            @Override
+            public void run() {
+
+                while (!isInterrupted()) {
+                    if (!clients.isEmpty()) {
+                        try {
+                            check();
+                            sleep(1000);
+                        } catch (InterruptedException e) {
+                            putLog("Поток проверки не смог уснуть " + e.getMessage());
+                        }
+                    }
+                }
+            }
+        };
+        checkActivity.start();
     }
 
     public void stop() {
