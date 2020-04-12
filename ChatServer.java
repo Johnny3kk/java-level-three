@@ -1,5 +1,7 @@
 package ru.gb.jt.chat.server.core;
 
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 import ru.gb.jt.chat.common.Library;
 import ru.gb.jt.network.ServerSocketThread;
 import ru.gb.jt.network.ServerSocketThreadListener;
@@ -13,6 +15,8 @@ import java.text.SimpleDateFormat;
 import java.util.Vector;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 public class ChatServer implements ServerSocketThreadListener, SocketThreadListener {
 
@@ -21,6 +25,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
     private final DateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss: ");
     private Vector<SocketThread> clients = new Vector<>();
     private ExecutorService executorService;
+    private static final Logger LOGGER = LogManager.getLogger(ChatServer.class);
 
     public ChatServer(ChatServerListener listener) {
         this.listener = listener;
@@ -55,8 +60,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
                                         check();
                                         sleep(1000);
                                     } catch (InterruptedException e) {
-                                        putLog("Поток проверки не смог уснуть " + e.getMessage());
-                                    }
+                                        LOGGER.error("Поток проверки не смог уснуть ");                                    }
                                 }
                             }
 
@@ -66,7 +70,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
     }
 
     public void stop() {
-        putLog("Server shutdown");
+        LOGGER.info("Server shutdown");
         executorService.shutdown();
     }
 
@@ -83,14 +87,13 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
 
     @Override
     public void onServerStart(ServerSocketThread thread) {
-        putLog("Server thread started");
+        LOGGER.info("Server thread started");
         SqlClient.connect();
     }
 
     @Override
     public void onServerStop(ServerSocketThread thread) {
-        putLog("Server thread stopped");
-        SqlClient.disconnect();
+        LOGGER.info("Server thread stopped");        SqlClient.disconnect();
         for (int i = 0; i < clients.size(); i++) {
             clients.get(i).close();
         }
@@ -99,8 +102,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
 
     @Override
     public void onServerSocketCreated(ServerSocketThread thread, ServerSocket server) {
-        putLog("Server socket created");
-
+        LOGGER.info("Server socket created");
     }
 
     @Override
@@ -111,7 +113,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
 
     @Override
     public void onSocketAccepted(ServerSocketThread thread, ServerSocket server, Socket socket) {
-        putLog("Client connected");
+        LOGGER.info("Client connected");
         String name = "SocketThread " + socket.getInetAddress() + ":" + socket.getPort();
         new ClientThread(this, name, socket);
 
@@ -129,8 +131,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
 
     @Override
     public synchronized void onSocketStart(SocketThread thread, Socket socket) {
-        putLog("Socket created");
-
+        LOGGER.info("Socket created");
     }
 
     @Override
@@ -140,7 +141,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
         if (client.isAuthorized() && !client.isReconnecting() ) {
             sendToAuthClients(Library.getTypeBroadcast("Server",
                     client.getNickname() + " disconnected"));
-        }
+        } else LOGGER.info("Неудачная попытка входа.\nСокет был закрыт по таймауту;");
         sendToAuthClients(Library.getUserList(getUsers()));
     }
 
@@ -169,7 +170,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
         String password = arr[2];
         String nickname = SqlClient.getNickname(login, password);
         if (nickname == null) {
-            putLog("Invalid login attempt: " + login);
+            LOGGER.info("Invalid login attempt: " + login);
             client.authFail();
             return;
         } else {
@@ -204,7 +205,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
             ClientThread client = (ClientThread) clients.get(i);
             if (!client.isAuthorized()) continue;
             client.sendMessage(msg);
-        }
+            LOGGER.info(msg);        }
     }
 
     @Override
