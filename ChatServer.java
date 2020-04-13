@@ -11,6 +11,8 @@ import java.net.Socket;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Vector;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ChatServer implements ServerSocketThreadListener, SocketThreadListener {
 
@@ -18,6 +20,7 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
     private ServerSocketThread server;
     private final DateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss: ");
     private Vector<SocketThread> clients = new Vector<>();
+    private ExecutorService executorService;
 
     public ChatServer(ChatServerListener listener) {
         this.listener = listener;
@@ -26,16 +29,45 @@ public class ChatServer implements ServerSocketThreadListener, SocketThreadListe
     public void start(int port) {
         if (server != null && server.isAlive())
             putLog("Server already started");
-        else
+        else {
+            executorService = Executors.newFixedThreadPool(2);
             server = new ServerSocketThread(this, "Server", port, 2000);
+            executorService.execute(server);
+            executorService.execute(
+                    new Thread() {
+                        synchronized void check() {
+                            ClientThread client;
+                            for (int i = 0; i < clients.size(); i++) {
+                                client = (ClientThread) clients.get(i);
+                                if (!client.isAuthorized()) {
+                                    client.sendMessage(Library.AUTH_DENIED + Library.DELIMITER + "Your connection was closed");
+                                    clients.get(i).close();
+                                    clients.remove(i);
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void run() {
+                            while (!isInterrupted()) {
+                                if (!clients.isEmpty()) {
+                                    try {
+                                        check();
+                                        sleep(1000);
+                                    } catch (InterruptedException e) {
+                                        putLog("Поток проверки не смог уснуть " + e.getMessage());
+                                    }
+                                }
+                            }
+
+                        }
+                    });
+        }
     }
 
     public void stop() {
-        if (server == null || !server.isAlive()) {
-            putLog("Server is not running");
-        } else {
-            server.interrupt();
-        }
+        putLog("Server shutdown");
+        executorService.shutdown();
     }
 
     private void putLog(String msg) {
